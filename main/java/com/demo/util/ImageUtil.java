@@ -8,17 +8,17 @@ import javax.imageio.ImageIO;
 import javax.imageio.ImageReader;
 import javax.imageio.stream.FileImageInputStream;
 import javax.imageio.stream.ImageInputStream;
+import java.awt.*;
 import java.awt.image.BufferedImage;
 import java.io.File;
 import java.io.FileInputStream;
+import java.io.FileOutputStream;
 import java.io.IOException;
-import java.util.HashMap;
-import java.util.Iterator;
-import java.util.Map;
+import java.util.*;
 
 /**
  * Image processing tools
- *
+ * <p>
  * New features are being developed ...
  *
  * @author Dominate
@@ -90,12 +90,10 @@ public class ImageUtil {
     public static Map<String, Integer> loadColorMap(File file) throws IOException {
         int[] imageSizes = getSize(file);
         BufferedImage image = ImageIO.read(file);
-        int startX = 0;
-        int startY = 0;
         Map<String, Integer> colorMap = new HashMap<>();
-        for (int i = startX; i < imageSizes[0]; i++) {
-            for (int j = startY; j < imageSizes[1]; j++) {
-                // 共32位 代表颜色的是前24位
+        for (int i = 0; i < imageSizes[0]; i++) {
+            for (int j = 0; j < imageSizes[1]; j++) {
+                // total 32 , the first 24 digits of the image
                 int pixel = image.getRGB(i, j);
                 String colorHex = Integer.toHexString((pixel & 0xffffff));
                 if (!colorMap.containsKey(colorHex)) {
@@ -117,30 +115,66 @@ public class ImageUtil {
      */
     public static ImageType getType(File file) throws IOException {
         assert file.isFile() : file.getAbsolutePath();
-        byte[] b = new byte[4];
+        byte[] bytes = new byte[4];
         try (FileInputStream fis = new FileInputStream(file)) {
-            fis.read(b, 0, b.length);
+            fis.read(bytes, 0, bytes.length);
         } catch (IOException e) {
             throw new IOException(e.getMessage());
         }
-
-        String hex = byteToHex(b);
-        ImageType type = ImageType.parseByHex(hex);
+        ImageType type = ImageType.parseByBytes(bytes);
         if (type == ImageType.UNKNOWN) {
-            throw new IOException("unknown image type");
+            throw new IOException("unknown image file " + file.getName());
         }
         return type;
     }
 
-    private static String byteToHex(byte[] bytes) {
-        StringBuilder sb = new StringBuilder();
-        for (int n = 0; n < bytes.length; n++) {
-            String strHex = Integer.toHexString(bytes[n] & 0xFF);
-            // each byte need two char if not enough is need "0"
-            sb.append((strHex.length() == 1) ? "0" + strHex : strHex);
+    public static void binaryImage(File file, double ratio) throws IOException {
+        int[] imageSizes = getSize(file);
+        BufferedImage image = ImageIO.read(file);
+        int[][] greys = new int[imageSizes[0]][imageSizes[1]];
+        int minGrey = 0;
+        int maxGrey = 0;
+        for (int i = 0; i < imageSizes[0]; i++) {
+            for (int j = 0; j < imageSizes[1]; j++) {
+                int thisGrey = parseGreyRGB(image.getRGB(i, j));
+                greys[i][j] = thisGrey;
+                if (thisGrey < minGrey) {
+                    minGrey = thisGrey;
+                }
+                if (thisGrey > maxGrey) {
+                    maxGrey = thisGrey;
+                }
+            }
         }
-        return sb.toString().trim();
+        int black = new Color(255, 255, 255).getRGB();
+        int white = new Color(0, 0, 0).getRGB();
+        int FZ = (int) ((maxGrey + minGrey) * ratio);
+        for (int i = 0; i < imageSizes[0]; i++) {
+            for (int j = 0; j < imageSizes[1]; j++) {
+                if (greys[i][j] > FZ) {
+                    image.setRGB(i, j, black);
+                } else {
+                    image.setRGB(i, j, white);
+                }
+            }
+        }
+        String typeName = getType(file).getName();
+        try (FileOutputStream ops = new FileOutputStream(file)) {
+            ImageIO.write(image, typeName, ops);
+        }
     }
+
+
+    private static int parseGreyRGB(int i) {
+        String argb = Integer.toHexString(i);
+        // argb - transparent,red,green,blue on 2 bits in hex
+        int r = Integer.parseInt(argb.substring(2, 4), 16);
+        int g = Integer.parseInt(argb.substring(4, 6), 16);
+        int b = Integer.parseInt(argb.substring(6, 8), 16);
+        int result = ((r + g + b) / 3);
+        return result;
+    }
+
 
     private static boolean hasFileType(String fileName) {
         return fileName.indexOf(".") > 0 && !fileName.endsWith(".");
